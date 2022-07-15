@@ -3,7 +3,7 @@ pipeline {
     stages {
         stage('Submit Stack') {
             steps {
-            sh "aws cloudformation create-stack --stack-name demo-ecs --template-body file://democft.yml --region 'us-east-2' --parameters ParameterKey=asgNotificationEp,ParameterValue=bhavishya@rapidinnovation.dev ParameterKey=keyName,ParameterValue=demo-key --capabilities CAPABILITY_IAM"
+            sh "aws cloudformation create-stack --stack-name demo-ecs --template-body file://democft.yml --region 'us-east-2'  --capabilities CAPABILITY_IAM"
               }
              }
             }
