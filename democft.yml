@@ -1,0 +1,678 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: CloudFormation Template for ECS
+Mappings:
+  ecsOptimizedAmi:
+    ap-southeast-2:
+      AMI: ami-0c7dea114481e059d
+Outputs:
+  awsRegionName:
+    Description: The name of the AWS Region your template was launched in
+    Value: !Ref 'AWS::Region'
+  websiteVpc:
+    Description: A reference to the created VPC
+    Value: !Ref websiteVpc
+  publicSubnet1:
+    Description: A reference to the public subnet in the 1st Availability Zone
+    Value: !Ref publicSubnet1
+  efsFs:
+    Description: Reference ID for the EFS stack
+    Value: !Ref efsFs
+Parameters:
+  ecsClusterTargetCapacity:
+    Default: 1
+    Description: Number of EC2 Spot instances to initially launch in the ECS cluster
+    Type: Number
+  instanceType:
+    AllowedValues:
+      - t3.small
+    Default: t3.small
+    Description: EC2 instance type to use for ECS cluster
+    Type: String
+  keyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the EC2 instances
+    Type: 'AWS::EC2::KeyPair::KeyName'
+  sourceCidr:
+    Default: 0.0.0.0/0
+    Description: Optional - CIDR/IP range for instance ssh access - defaults to 0.0.0.0/0
+    Type: String
+  environmentName:
+    Description: An environment name that will be prefixed to resource names
+    Type: String
+    Default: website-ecs
+  vpcCidr:
+    Description: Please enter the IP range (CIDR notation) for this VPC
+    Type: String
+    Default: 10.0.0.0/16
+  publicSubnet1Cidr:
+    Description: >-
+      Please enter the IP range (CIDR notation) for the public subnet in the
+      first Availability Zone
+    Type: String
+    Default: 10.0.1.0/24
+  asgNotificationEp:
+    Description: The email address to receive notifications for the Auto Scaling Group
+    Type: String
+Resources:
+  websiteVpc:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: !Ref vpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: !Ref environmentName
+  internetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    DependsOn:
+      - websiteVpc
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Ref environmentName
+  internetGatewayAttachment:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    DependsOn:
+      - websiteVpc
+      - internetGateway
+    Properties:
+      InternetGatewayId: !Ref internetGateway
+      VpcId: !Ref websiteVpc
+  publicSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    DependsOn:
+      - websiteVpc
+    Properties:
+      VpcId: !Ref websiteVpc
+      AvailabilityZone: !Select 
+        - 0
+        - !GetAZs ''
+      CidrBlock: !Ref publicSubnet1Cidr
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${environmentName} Public Subnet (AZ1)'
+  publicRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    DependsOn:
+      - websiteVpc
+    Properties:
+      VpcId: !Ref websiteVpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${environmentName} Public Route Table'
+  defaultPublicRoute:
+    Type: 'AWS::EC2::Route'
+    DependsOn:
+      - internetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref publicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref internetGateway
+  publicSubnet1RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      RouteTableId: !Ref publicRouteTable
+      SubnetId: !Ref publicSubnet1
+  elasticNetworkInterface:
+    Type: 'AWS::EC2::NetworkInterface'
+    Properties:
+      Description: ENI for spot instance
+      SourceDestCheck: true
+      SubnetId: !Ref publicSubnet1
+      GroupSet:
+        - !Ref ecsInstanceSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Ref environmentName
+  ecsInstanceSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    DependsOn:
+      - websiteVpc
+    Properties:
+      GroupName: ecs-access-from-internet
+      GroupDescription: Web and SSH from anywhere to ECS Auto Scaling Instances
+      SecurityGroupIngress:
+        - CidrIp: !Ref sourceCidr
+          FromPort: 22
+          IpProtocol: tcp
+          ToPort: 22
+        - CidrIp: !Ref sourceCidr
+          FromPort: 443
+          IpProtocol: tcp
+          ToPort: 443
+        - CidrIp: !Ref sourceCidr
+          FromPort: 80
+          IpProtocol: tcp
+          ToPort: 80
+      VpcId: !Ref websiteVpc
+  efsSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    DependsOn:
+      - websiteVpc
+    Properties:
+      GroupName: efs-access-from-ecs
+      GroupDescription: Security Group for EFS access from ECS
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          SourceSecurityGroupId: !Ref ecsInstanceSecurityGroup
+          FromPort: 2049
+          ToPort: 2049
+      VpcId: !Ref websiteVpc
+  efsFs:
+    Type: 'AWS::EFS::FileSystem'
+    Properties:
+      Encrypted: false
+      FileSystemTags:
+        - Key: Name
+          Value: !Ref environmentName
+      PerformanceMode: generalPurpose
+      ThroughputMode: bursting
+  efsMountPoint:
+    Type: 'AWS::EFS::MountTarget'
+    DependsOn:
+      - efsFs
+    Properties:
+      FileSystemId: !Ref efsFs
+      SecurityGroups:
+        - !Ref efsSecurityGroup
+      SubnetId: !Ref publicSubnet1
+  ecsTaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      ContainerDefinitions:
+        - Name: nginx
+          Hostname: nginx
+          Cpu: 128
+          Memory: 256
+          MemoryReservation: 256
+          Image: 'nginx:latest'
+          Essential: true
+          PortMappings:
+            - ContainerPort: 80
+              HostPort: 80
+              Protocol: tcp
+            - ContainerPort: 443
+              HostPort: 443
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: /ecs/website
+              awslogs-region: ap-southeast-2
+              awslogs-stream-prefix: ecs
+  ecsCluster:
+    Type: 'AWS::ECS::Cluster'
+    Properties:
+      ClusterName: website-cluster
+      Tags:
+        - Key: Name
+          Value: !Ref environmentName
+  ecsService:
+    Type: 'AWS::ECS::Service'
+    DependsOn:
+      - ecsAutoScalingGroup
+    Properties:
+      Cluster: !Ref ecsCluster
+      DeploymentConfiguration:
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      LaunchType: EC2
+      PlacementStrategies:
+        - Field: 'attribute:ecs.availability-zone'
+          Type: spread
+        - Field: instanceId
+          Type: spread
+      SchedulingStrategy: REPLICA
+      ServiceName: website-service
+      Tags:
+        - Key: Name
+          Value: !Ref environmentName
+      TaskDefinition: !Ref ecsTaskDefinition
+  ecsAutoScalingTarget:
+    Type: 'AWS::ApplicationAutoScaling::ScalableTarget'
+    DependsOn:
+      - autoScalingRole
+      - ecsCluster
+      - ecsService
+    Properties:
+      MaxCapacity: 2
+      MinCapacity: 1
+      ResourceId: !Join 
+        - /
+        - - service
+          - !Ref ecsCluster
+          - !GetAtt ecsService.Name
+      RoleARN: !GetAtt autoScalingRole.Arn
+      ScalableDimension: 'ecs:service:DesiredCount'
+      ServiceNamespace: ecs
+  cloudWatchLogsGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      RetentionInDays: 7
+  websiteLaunchTemplate:
+    Type: 'AWS::EC2::LaunchTemplate'
+    DependsOn:
+      - elasticNetworkInterface
+      - instanceProfile
+      - ecsCluster
+    Properties:
+      LaunchTemplateData:
+        InstanceType: !Ref instanceType
+        KeyName: !Ref keyName
+        CreditSpecification:
+          CpuCredits: standard
+        ImageId:
+          'Fn::FindInMap':
+            - ecsOptimizedAmi
+            - Ref: 'AWS::Region'
+            - AMI
+        IamInstanceProfile:
+          Arn: !GetAtt instanceProfile.Arn
+        NetworkInterfaces:
+          - NetworkInterfaceId: !Ref elasticNetworkInterface
+            DeviceIndex: 0
+        InstanceMarketOptions:
+          MarketType: spot
+          SpotOptions:
+            InstanceInterruptionBehavior: terminate
+            MaxPrice: 0.01
+            SpotInstanceType: one-time
+        UserData:
+          'Fn::Base64': !Sub >
+            #!/bin/bash
+
+            export PATH=/usr/local/bin:$PATH
+
+            yum -y --security update
+
+            yum -y install jq
+
+            easy_install pip
+
+            pip install awscli
+
+            aws configure set default.region ${AWS::Region}
+
+            echo ECS_CLUSTER=${ecsCluster} >> /etc/ecs/ecs.config
+
+            echo ECS_BACKEND_HOST= >> /etc/ecs/ecs.config
+
+
+            cat <<EOF > /tmp/awslogs.conf
+
+            [general]
+
+            state_file = /var/awslogs/state/agent-state
+
+
+            [/var/log/dmesg]
+
+            file = /var/log/dmesg
+
+            log_group_name = ${cloudWatchLogsGroup}
+
+            log_stream_name = %ECS_CLUSTER/%CONTAINER_INSTANCE/var/log/dmesg
+
+            initial_position = start_of_file
+
+
+            [/var/log/messages]
+
+            file = /var/log/messages
+
+            log_group_name = ${cloudWatchLogsGroup}
+
+            log_stream_name = %ECS_CLUSTER/%CONTAINER_INSTANCE/var/log/messages
+
+            datetime_format = %b %d %H:%M:%S
+
+            initial_position = start_of_file
+
+
+            [/var/log/docker]
+
+            file = /var/log/docker
+
+            log_group_name = ${cloudWatchLogsGroup}
+
+            log_stream_name = %ECS_CLUSTER/%CONTAINER_INSTANCE/var/log/docker
+
+            datetime_format = %Y-%m-%dT%H:%M:%S.%f
+
+            initial_position = start_of_file
+
+
+            [/var/log/ecs/ecs-init.log]
+
+            file = /var/log/ecs/ecs-init.log.*
+
+            log_group_name = ${cloudWatchLogsGroup}
+
+            log_stream_name =
+            %ECS_CLUSTER/%CONTAINER_INSTANCE/var/log/ecs/ecs-init.log
+
+            datetime_format = %Y-%m-%dT%H:%M:%SZ
+
+            initial_position = start_of_file
+
+
+            [/var/log/ecs/ecs-agent.log]
+
+            file = /var/log/ecs/ecs-agent.log.*
+
+            log_group_name = ${cloudWatchLogsGroup}
+
+            log_stream_name =
+            %ECS_CLUSTER/%CONTAINER_INSTANCE/var/log/ecs/ecs-agent.log
+
+            datetime_format = %Y-%m-%dT%H:%M:%SZ
+
+            initial_position = start_of_file
+
+
+            [/var/log/ecs/audit.log]
+
+            file = /var/log/ecs/audit.log.*
+
+            log_group_name = ${cloudWatchLogsGroup}
+
+            log_stream_name =
+            %ECS_CLUSTER/%CONTAINER_INSTANCE/var/log/ecs/audit.log
+
+            datetime_format = %Y-%m-%dT%H:%M:%SZ
+
+            initial_position = start_of_file
+
+            EOF
+
+
+            cd /tmp && curl -sO
+            https://s3.amazonaws.com/aws-cloudwatch/downloads/latest/awslogs-agent-setup.py
+
+            python /tmp/awslogs-agent-setup.py -n -r ${AWS::Region} -c
+            /tmp/awslogs.conf
+
+
+            cat <<EOF > /etc/init/cloudwatch-logs-start.conf
+
+            description "Configure and start CloudWatch Logs agent on Amazon ECS
+            container instance"
+
+            author "Amazon Web Services"
+
+            start on started ecs
+
+            script
+
+            exec 2>>/var/log/cloudwatch-logs-start.log
+
+            set -x
+
+            until curl -s http://localhost:51678/v1/metadata; do sleep 1; done
+
+            ECS_CLUSTER=\$(curl -s http://localhost:51678/v1/metadata | jq
+            .Cluster | tr -d \")
+
+            CONTAINER_INSTANCE=\$(curl -s http://localhost:51678/v1/metadata |
+            jq .ContainerInstanceArn | tr -d \")
+
+            sed -i "s|%ECS_CLUSTER|\$ECS_CLUSTER|g"
+            /var/awslogs/etc/awslogs.conf
+
+            sed -i "s|%CONTAINER_INSTANCE|\$CONTAINER_INSTANCE|g"
+            /var/awslogs/etc/awslogs.conf
+
+            chkconfig awslogs on
+
+            service awslogs start
+
+            end script
+
+            EOF
+
+
+            cat <<EOF > /etc/init/spot-instance-termination-notice-handler.conf
+
+            description "Start spot instance termination handler monitoring
+            script"
+
+            author "Amazon Web Services"
+
+            start on started ecs
+
+            script
+
+            echo \$\$ > /var/run/spot-instance-termination-notice-handler.pid
+
+            exec /usr/local/bin/spot-instance-termination-notice-handler.sh
+
+            end script
+
+            pre-start script
+
+            logger "[spot-instance-termination-notice-handler.sh]: spot instance
+            termination notice handler started"
+
+            end script
+
+            EOF
+
+
+            cat <<EOF >
+            /usr/local/bin/spot-instance-termination-notice-handler.sh
+
+            #!/bin/bash
+
+            while sleep 5; do
+
+            if [ -z \$(curl -Isf
+            http://169.254.169.254/latest/meta-data/spot/termination-time)];
+
+            then
+
+            /bin/false
+
+            else
+
+            logger "[spot-instance-termination-notice-handler.sh]: spot instance
+            termination notice detected"
+
+            STATUS=DRAINING
+
+            ECS_CLUSTER=\$(curl -s http://localhost:51678/v1/metadata | jq
+            .Cluster | tr -d \")
+
+            CONTAINER_INSTANCE=\$(curl -s http://localhost:51678/v1/metadata |
+            jq .ContainerInstanceArn | tr -d \")
+
+            logger "[spot-instance-termination-notice-handler.sh]: putting
+            instance in state $STATUS"
+
+            logger "[spot-instance-termination-notice-handler.sh]: running:
+            /bin/aws ecs update-container-instances-state --cluster
+            \$ECS_CLUSTER --container-instances $CONTAINER_INSTANCE --status
+            \$STATUS"
+
+            /bin/aws ecs update-container-instances-state --cluster $ECS_CLUSTER
+            --container-instances \$CONTAINER_INSTANCE --status \$STATUS
+
+            logger "[spot-instance-termination-notice-handler.sh]: running:
+            \"/bin/aws sns publish --topic-arn
+            ${snsTopicForSpotInstanceMonitorScript} --message \"Spot instance
+            termination notice detected. Details: cluster: \$ECS_CLUSTER,
+            container_instance: \$CONTAINER_INSTANCE. Putting instance in state
+            \$STATUS.\""
+
+            /bin/aws sns publish --topic-arn
+            ${snsTopicForSpotInstanceMonitorScript} --message "Spot instance
+            termination notice detected. Details: cluster: \$ECS_CLUSTER,
+            container_instance: \$CONTAINER_INSTANCE. Putting instance in state
+            \$STATUS."
+
+            logger "[spot-instance-termination-notice-handler.sh]: putting
+            myself to sleep..."
+
+            sleep 120
+
+            fi
+
+            done
+
+            EOF
+
+
+            chmod +x /usr/local/bin/spot-instance-termination-notice-handler.sh
+
+            mkdir /mnt/efs
+
+            yum install -y amazon-efs-utils
+
+            cp /etc/fstab /etc/fstab.bak
+
+            echo "${efsFs}:/ /mnt/efs efs defaults,_netdev 0 0" | tee -a
+            /etc/fstab
+
+            mount -a
+
+            # aws s3 cp s3://temp-jasonneurohr/letsencrypt /mnt/efs/ --recursive
+  ecsAutoScalingGroup:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    DependsOn:
+      - efsMountPoint
+      - snsTopicForAutoScalingGroup
+    Properties:
+      AutoScalingGroupName: ecs-website
+      AvailabilityZones:
+        - !Select 
+          - 0
+          - !GetAZs ''
+      Cooldown: 300
+      DesiredCapacity: 1
+      HealthCheckGracePeriod: 0
+      HealthCheckType: EC2
+      LaunchTemplate:
+        LaunchTemplateId: !Ref websiteLaunchTemplate
+        Version: !GetAtt websiteLaunchTemplate.LatestVersionNumber
+      MaxSize: 1
+      MinSize: 1
+      NotificationConfigurations:
+        - TopicARN: !Ref snsTopicForAutoScalingGroup
+          NotificationTypes:
+            - 'autoscaling:EC2_INSTANCE_LAUNCH'
+            - 'autoscaling:EC2_INSTANCE_LAUNCH_ERROR'
+            - 'autoscaling:EC2_INSTANCE_TERMINATE'
+            - 'autoscaling:EC2_INSTANCE_TERMINATE_ERROR'
+            - 'autoscaling:TEST_NOTIFICATION'
+      Tags:
+        - Key: Name
+          Value: !Ref environmentName
+          PropagateAtLaunch: true
+      TerminationPolicies:
+        - Default
+  autoScalingRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - application-autoscaling.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: service-autoscaling
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'application-autoscaling:*'
+                  - 'cloudwatch:DescribeAlarms'
+                  - 'cloudwatch:PutMetricAlarm'
+                  - 'ecs:DescribeServices'
+                  - 'ecs:UpdateService'
+                Resource: '*'
+  instanceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+        Version: 2012-10-17
+      ManagedPolicyArns:
+        - >-
+          arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+      Path: /
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - 'ecs:UpdateContainerInstancesState'
+                Effect: Allow
+                Resource: '*'
+            Version: 2012-10-17
+          PolicyName: ecsUpdateContainerInstancesStatePolicy
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                  - 'logs:DescribeLogStreams'
+                Effect: Allow
+                Resource: 'arn:aws:logs:*:*:*'
+            Version: 2012-10-17
+          PolicyName: cloudWatchLogsPolicy
+        - PolicyName: ec2-read-temp-jasonneurohr-s3-bucket
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:Get*'
+                  - 's3:List*'
+                Resource:
+                  - 'arn:aws:s3:::temp-jasonneurohr'
+                  - 'arn:aws:s3:::temp-jasonneurohr/*'
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - 'sns:Publish'
+                Effect: Allow
+                Resource: !Ref snsTopicForSpotInstanceMonitorScript
+            Version: 2012-10-17
+          PolicyName: snsPublishPolicy
+  instanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    DependsOn:
+      - instanceRole
+    Properties:
+      Path: /
+      Roles:
+        - Ref: instanceRole
+  snsTopicForAutoScalingGroup:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      DisplayName: ecs-website-autoscalingroup
+      Subscription:
+        - Endpoint: !Ref asgNotificationEp
+          Protocol: email
+      TopicName: ecs-website-autoscalingroup
+  snsTopicForSpotInstanceMonitorScript:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      DisplayName: ecs-website-spotinstancemonitor
+      Subscription:
+        - Endpoint: !Ref asgNotificationEp
+          Protocol: email
+      TopicName: ecs-website-spotinstancemonitor
