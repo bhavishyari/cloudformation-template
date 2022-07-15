@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: 2010-09-09
 Description: CloudFormation Template for ECS
 Mappings:
   ecsOptimizedAmi:
-    ap-southeast-2:
+    us-east-2:
       AMI: ami-0c7dea114481e059d
 Outputs:
   awsRegionName:
