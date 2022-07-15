@@ -3,7 +3,7 @@ Description: CloudFormation Template for ECS
 Mappings:
   ecsOptimizedAmi:
     us-east-2:
-      AMI: ami-0c7dea114481e059d
+      AMI: ami-09ce6553a7f2ae75d
 Outputs:
   awsRegionName:
     Description: The name of the AWS Region your template was launched in
