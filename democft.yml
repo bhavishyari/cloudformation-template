@@ -200,7 +200,7 @@ Resources:
             LogDriver: awslogs
             Options:
               awslogs-group: /ecs/website
-              awslogs-region: ap-southeast-2
+              awslogs-region: us-east-2
               awslogs-stream-prefix: ecs
   ecsCluster:
     Type: 'AWS::ECS::Cluster'
