@@ -188,7 +188,7 @@ Resources:
           Cpu: 128
           Memory: 256
           MemoryReservation: 256
-          Image: 'nginx:latest'
+          Image: 'mynkthkr/demoweb:v2'
           Essential: true
           PortMappings:
             - ContainerPort: 80
