@@ -25,7 +25,7 @@ Parameters:
   Subnet2ID:
     Description: Choose which subnets this ECS cluster should be deployed to
     Type: 'AWS::EC2::Subnet::Id'
-     Default: '192.168.2.0/24'
+    Default: '192.168.2.0/24'
   Cluster:
     Description: The ECS Cluster ID that this service should run on
     Type: String
