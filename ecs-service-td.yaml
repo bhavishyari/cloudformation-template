@@ -17,12 +17,15 @@ Parameters:
   IDVPC:
     Description: The VPC that the ECS cluster is deployed to
     Type: 'AWS::EC2::VPC::Id'
+    Default: 'vpc-00c9e241f2c793733'
   Subnet1ID:
     Description: Choose which subnets this ECS cluster should be deployed to
     Type: 'AWS::EC2::Subnet::Id'
+    Default: 'vpc-0b453f8802b925fc9'
   Subnet2ID:
     Description: Choose which subnets this ECS cluster should be deployed to
     Type: 'AWS::EC2::Subnet::Id'
+    Default: 'vpc-0b453f8802b925fc9'
   Cluster:
     Description: The ECS Cluster ID that this service should run on
     Type: String
