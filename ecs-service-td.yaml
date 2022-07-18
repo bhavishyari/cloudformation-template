@@ -1,0 +1,196 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    Type: String
+    AllowedValues:
+      - Development
+      - UAT
+      - Production
+  ServiceType:
+    Description: Select the service type for ECS.
+    Type: String
+    Default: Simple
+    AllowedValues:
+      - Websocket
+      - Simple
+  IDVPC:
+    Description: The VPC that the ECS cluster is deployed to
+    Type: 'AWS::EC2::VPC::Id'
+  Subnet1ID:
+    Description: Choose which subnets this ECS cluster should be deployed to
+    Type: 'AWS::EC2::Subnet::Id'
+  Subnet2ID:
+    Description: Choose which subnets this ECS cluster should be deployed to
+    Type: 'AWS::EC2::Subnet::Id'
+  Cluster:
+    Description: The ECS Cluster ID that this service should run on
+    Type: String
+    Default: 'arn:aws:ecs:REGION:123412341234:cluster/cluster-arn'
+  Port:
+    Description: >-
+      What TCP port is the application listening on in your container? (default
+      80)
+    Type: Number
+    Default: 80
+  DockerImage:
+    Description: The Task Container Image (full ECR path and tag)
+    Type: String
+    Default: '123412341234.dkr.ecr.REGION.amazonaws.com/arm64/example-app:latest'
+  Cpu:
+    Description: CPU Limit for this ECS Service
+    Type: Number
+    Default: 256
+  Memory:
+    Description: Memory Limit for this ECS Service
+    Type: Number
+    Default: 512
+Resources:
+  LogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: aws-ecs-api-group
+  ExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: aws-ecs-api-role
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+  TaskRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: 'sts:AssumeRole'
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+      Policies:
+        - PolicyDocument:
+            Statement:
+              Action:
+                - 'ses:SendEmail'
+              Effect: Allow
+              Resource: '*'
+          PolicyName: send-mail
+  TaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      Family: aws-ecs-task
+      Cpu: !Ref Cpu
+      Memory: !Ref Memory
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !Ref ExecutionRole
+      TaskRoleArn: !Ref TaskRole
+      ContainerDefinitions:
+        - Name: aws-ecs-container
+          Image: !Ref DockerImage
+          PortMappings:
+            - ContainerPort: !Ref Port
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: ecs
+          Environment:
+            - Name: NODE_ENV
+              Value: development
+            - Name: MONGODB_URI
+              Value: 'mongodb://localhost:27017/mydb'
+            - Name: CONTRACT
+              Value: 'ETHEREUM:0xd01cc4b60693bdf726687a8ea37a7aa3cf52cca5'
+            - Name: STAKEDMETA_URL
+              Value: 'https://api.hedron.pro/1/hsi/'
+            - Name: RARIBLENFT_URL
+              Value: 'https://api-staging.rarible.org/v0.1/items/byOwner?owner='
+            - Name: MAINNET_URL
+              Value: 'https://mainnet.infura.io/v3/391511e84300430abbe0b3b240b16a0f'
+            - Name: HEX_ADDRESS
+              Value: '0x2b591e99afE9f32eAA6214f7B7629768c40Eeb39'
+            - Name: SECRET
+              Value: '123ROOT@#!'
+      RequiresCompatibilities:
+        - FARGATE
+  LoadBalancerSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupName: LoadBalancerSecurityGroup
+      GroupDescription: Security group for load balancer
+      VpcId: !Ref IDVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+  ContainerSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupName: ContainerSecurityGroup
+      GroupDescription: Security group for container
+      VpcId: !Ref IDVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref Port
+          ToPort: !Ref Port
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+  LoadBalancer:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      IpAddressType: ipv4
+      Name: aws-ecs-api-alb
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+      Subnets:
+        - !Ref Subnet1ID
+        - !Ref Subnet2ID
+      Type: application
+  TargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    DependsOn: LoadBalancer
+    Properties:
+      TargetType: ip
+      Name: aws-ecs-tg
+      Port: !Ref Port
+      Protocol: HTTP
+      VpcId: !Ref IDVPC
+  HTTPlistener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+        - Type: forward
+          ForwardConfig:
+            TargetGroups:
+              - TargetGroupArn: !Ref TargetGroup
+                Weight: 1
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 3000
+      Protocol: HTTP
+  Service:
+    Type: 'AWS::ECS::Service'
+    DependsOn: HTTPlistener
+    Properties:
+      ServiceName: aws-ecs-svc
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - !Ref Subnet1ID
+            - !Ref Subnet2ID
+          SecurityGroups:
+            - !Ref ContainerSecurityGroup
+      LoadBalancers:
+        - TargetGroupArn: !Ref TargetGroup
+          ContainerPort: !Ref Port
+          ContainerName: aws-ecs-container
