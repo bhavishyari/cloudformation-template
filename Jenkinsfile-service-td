@@ -3,7 +3,7 @@ pipeline {
     stages {
         stage('Submit Stack') {
             steps {
-            sh "aws cloudformation create-stack --stack-name ecs---template-body file://ecs-service-td.yml --region 'us-east-2' --capabilities CAPABILITY_IAM"
+            sh "aws cloudformation create-stack --stack-name ecs-service-td --template-body file://ecs-service-td.yaml --region 'us-east-2' --parameters ParameterKey="EnvironmentName",ParameterValue=${EnvironmentName} ParameterKey="ServiceType",ParameterValue=${ServiceType} ParameterKey="IDVPC",ParameterValue=${IDVPC} ParameterKey="Subnet1ID",ParameterValue=${Subnet1ID} ParameterKey="Subnet2ID",ParameterValue=${Subnet2ID} ParameterKey="Cluster",ParameterValue=${Cluster} ParameterKey="DockerImage",ParameterValue=${DockerImage} ParameterKey="Port",ParameterValue=${Port} ParameterKey="Cpu",ParameterValue=${Cpu}  ParameterKey="Memory",ParameterValue=${Memory}  --capabilities CAPABILITY_NAMED_IAM"
               }
              }
             }

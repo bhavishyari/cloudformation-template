@@ -3,7 +3,7 @@ pipeline {
     stages {
         stage('Submit Stack') {
             steps {
-            sh "aws cloudformation create-stack --stack-name ecs-cicd --template-body file://ecs-cicd.yml --region 'us-east-2' --capabilities CAPABILITY_IAM"
+            sh "aws cloudformation create-stack --stack-name ecs-cicd --template-body file://ecs-cicd.yaml --region 'us-east-2' --parameters ParameterKey="GitHubRepo",ParameterValue=${GitHubRepo} ParameterKey="GitHubBranch",ParameterValue=${GitHubBranch} ParameterKey="GitHubToken",ParameterValue=${GitHubToken} ParameterKey="GitHubUser",ParameterValue=${GitHubUser} ParameterKey="Cluster",ParameterValue=${Cluster} ParameterKey="Service",ParameterValue=${Service} --capabilities CAPABILITY_IAM"
               }
              }
             }
