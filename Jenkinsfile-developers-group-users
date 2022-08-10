@@ -1,0 +1,10 @@
+pipeline {
+    agent any
+    stages {
+        stage('Submit Stack') {
+            steps {
+            sh "aws cloudformation create-stack --stack-name cloudwatch-users --template-body file://developers-group-user.yaml --region 'us-east-1' --parameter ParameterKey="paramGroupName",ParameterValue=${paramGroupName} ParameterKey="paramUserNames",ParameterValue=${paramUserNames} ParameterKey="paramUserName",ParameterValue=${paramUserName} ParameterKey="paramUserPassword",ParameterValue=${paramUserPassword} ParameterKey="paramPath",ParameterValue=${paramPath} --capabilities CAPABILITY_NAMED_IAM"
+              }
+             }
+            }
+            }
