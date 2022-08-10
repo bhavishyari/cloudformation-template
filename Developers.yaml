@@ -1,0 +1,84 @@
+## =================== VERSION ===================
+AWSTemplateFormatVersion: '2010-09-09'
+
+## =================== DESCRIPTION ===================
+Description: >-
+  AWS CloudFormation sample template 
+  Create an IAM User and optionally attach it to IAM group(s)
+  AWS doc: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-iam-user.html
+
+## =================== PARAMETERS ===================
+Parameters:
+  paramPath:
+    Description: IAM Path that you want to associate with the group 
+    Type: String
+    AllowedPattern: (^\/$)|(^\/.*\/$)
+    Default: '/'
+  paramGroupName:
+    Description: Name of existing group
+    Type: String
+    MinLength: 1
+  paramUserNames:
+    Description: Comma-delimited list of user names to attach to the group
+    Type: CommaDelimitedList
+  paramUserName:
+    Description: Unique name for a new user
+    Type: String
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9]{1,64}$"
+    ConstraintDescription: User name must be between 1 and 64 alphanumeric characters in length, starting with an uppercase or lowercase character of the alphabet.
+  paramUserPassword:
+    Description: Account password for a new user
+    Type: String    
+    NoEcho: 'true' # mask the parameter value as asterisks (*****) to prevent it from being displayed in the console, CLI, or API
+    AllowedPattern: ^[a-zA-Z][a-zA-Z0-9!@#$%&]{8,32}$
+    ConstraintDescription: Password must be between 8 and 32 characters, start with lowercase or uppercase letter, and can be alphanumeric with the following special characters !@#$%&
+  paramPath:
+    Description: IAM Path that you want to associate with the user 
+    Type: String
+    AllowedPattern: (^\/$)|(^\/.*\/$)
+    Default: '/'
+
+## =================== RESOURCES ===================
+Resources:
+  myUser:
+    Type: 'AWS::IAM::User'
+    Properties:
+      UserName: !Ref paramUserName # give a name to this user
+      LoginProfile: # specify a password for this user
+        Password: !Ref paramUserPassword
+        PasswordResetRequired: true # make this user to set a new password on next sign-in
+      Path: !Ref paramPath
+  myGroup:
+    Type: 'AWS::IAM::Group'
+    Properties:
+      GroupName: Developers # give a name to this group
+      Path: !Ref paramPath
+      ManagedPolicyArns: # list of ARNs of IAM managed policies that you want to attach to the group
+        - arn:aws:iam::aws:policy/CloudWatchLogsReadOnlyAccess # provide administrator access to AWS Cloud9
+       # - arn:aws:iam::aws:policy/AmazonAPIGatewayAdministrator # provide full access to create/edit/delete APIs in Amazon API Gateway
+        # - arn:aws:iam::111111111111:policy/customerManagedBlahBlahPolicy # use your own customer managed policy specifying its ARN
+      Policies: # list of inline policy documents that are embedded in the group
+        - PolicyName: inlineCloudWatchLogsPolicy # give a unique name to this policy
+          PolicyDocument: # JSON policy document
+            Version: '2012-10-17'
+            Statement: # provide write permissions to CloudWatch Logs
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream*'
+                  - 'logs:PutLogEvents'
+                Resource: '*'
+  myUserToGroupAddition:
+    Type: 'AWS::IAM::UserToGroupAddition'
+    DependsOn: myUser
+    Properties:
+      GroupName: !Ref paramGroupName # existing group name
+      Users: !Ref paramUserNames # list of existing user names
+## =================== OUTPUT ===================
+Outputs:
+  outputName:
+    Description: User name
+    Value: !Ref myUser
+  outputArn:
+    Description: User ARN
+    Value: !GetAtt myUser.Arn

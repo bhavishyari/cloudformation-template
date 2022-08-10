@@ -1,0 +1,89 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  Repository:
+    Type: String
+    Description: GitHub URL
+  OauthToken:
+    Type: String
+    Description: Access Token for GitHub
+    NoEcho: true
+  Domain:
+    Type: String
+    Description: Domain to Host Your Application
+Resources:
+  AmplifyRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - amplify.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: Amplify-poc
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 'amplify:*'
+                Resource: '*'
+  AmplifyApp:
+    Type: 'AWS::Amplify::App'
+    Properties:
+      Name: web-react-frontend-poc
+      Repository: !Ref Repository
+      Description: poc with cloudformation
+      OauthToken: !Ref OauthToken
+      BuildSpec: |-
+        version: 1
+        frontend:
+          phases:
+            preBuild:
+              commands:
+                - yarn install
+            build:
+              commands:
+                - yarn run build
+          artifacts:
+            baseDirectory: build
+            files:
+              - '**/*'
+          cache:
+            paths:
+              - node_modules/**/*
+      Tags:
+        - Key: Name
+          Value: poc
+      IAMServiceRole: !GetAtt AmplifyRole.Arn
+  AmplifyBranch:
+    Type: 'AWS::Amplify::Branch'
+    Properties:
+      BranchName: main
+      AppId: !GetAtt AmplifyApp.AppId
+      Description: Main Branch
+      EnableAutoBuild: true
+      Tags:
+        - Key: Name
+          Value: poc-main
+        - Key: Branch
+          Value: main
+  AmplifyDomain:
+    Type: 'AWS::Amplify::Domain'
+    Properties:
+      DomainName: !Ref Domain
+      AppId: !GetAtt AmplifyApp.AppId
+      SubDomainSettings:
+        - Prefix: main
+          BranchName: !GetAtt AmplifyBranch.BranchName
+Outputs:
+  DefaultDomain:
+    Value: !GetAtt AmplifyApp.DefaultDomain
+  MasterBranchUrl:
+    Value: !Join
+      - .
+      - - !GetAtt AmplifyBranch.BranchName
+        - !GetAtt AmplifyDomain.DomainName
